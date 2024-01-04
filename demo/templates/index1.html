@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Music Assistant</title>
+</head>
+<body>
+<h1>NetEase Cloud Music Assistant</h1>
+
+<!--<button id="startRecordingButton">Start Talking</button>-->
+<!--<button id="stopRecordingButton">Stop Talking</button>-->
+
+<!--<div id="info"></div>-->
+<br>
+<div style="background-color: #f2f2f2; border-radius: 5px; padding: 20px; box-shadow: 0px 0px 10px #888888;" id="resultDisplay">Dialog History</div>
+
+  <script>
+      // var start = 0;
+      // var SAMPLE_RATE = 44100;
+      //
+      // // const startRecordingButton = document.getElementById("startRecordingButton");
+      // // const stopRecordingButton = document.getElementById("stopRecordingButton");
+      const resultDisplay = document.getElementById('resultDisplay');
+
+
+      const threshold = 0.02;
+      //let isRecording = false;
+      let timeout;
+
+
+      var blob = null;
+      var SAMPLE_RATE = 48000;
+      var leftchannel = [];
+      var rightchannel = [];
+      var recorder = null;
+      var recordingLength = 0;
+      var context = null;
+      var mediaStream = null;
+      let wakeup = false;
+
+      //
+      //   // Initialize recorder
+      //
+      // // navigator.getUserMedia = navigator.getUserMedia ||navigator.webkitGetUserMedia ||navigator.mozGetUserMedia ||navigator.msGetUserMedia;
+      //
+      navigator.getUserMedia(
+        {
+          // audio: true
+          audio: {
+            sampleRate: SAMPLE_RATE,
+            channelCount: 2 // canary 中此设置未生效，始终为 2
+          }
+        },
+
+        function(e) {
+          console.log("user consent");
+
+          // creates the audio context
+          // window.AudioContext =
+          //   window.AudioContext || window.webkitAudioContext;
+          context = new AudioContext({sampleRate: SAMPLE_RATE});
+
+          // creates an audio node from the microphone incoming stream
+          mediaStream = context.createMediaStreamSource(e);
+
+          // https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/createScriptProcessor
+          // bufferSize: the onaudioprocess event is called when the buffer is full
+          var bufferSize = 2048;
+          var numberOfInputChannels = 2;
+          var numberOfOutputChannels = 2;
+          if (context.createScriptProcessor) {
+            recorder = context.createScriptProcessor(
+              bufferSize,
+              numberOfInputChannels,
+              numberOfOutputChannels
+            );
+          } else {
+            recorder = context.createJavaScriptNode(
+              bufferSize,
+              numberOfInputChannels,
+              numberOfOutputChannels
+            );
+          }
+
+
+          // we connect the recorder
+          mediaStream.connect(recorder);
+          recorder.connect(context.destination);
+
+
+          recorder.onaudioprocess = function(event) {
+            const inputData = event.inputBuffer.getChannelData(0);
+            let maxValue = 0;
+            for (let i = 0; i < inputData.length; i++) {
+              const absValue = Math.abs(inputData[i]);
+              if (absValue > maxValue) {
+                maxValue = absValue;
+              }
+            }
+            //console.log("声音值",maxValue);
+            if (maxValue > threshold) {
+              console.log("检测到声音...");
+              //isRecording = true;
+
+              //if (isRecording) {
+                // isRecording = true;
+              //console.log("开始录音...");
+
+              leftchannel.push(
+                new Float32Array(event.inputBuffer.getChannelData(0))
+              );
+              rightchannel.push(
+                new Float32Array(event.inputBuffer.getChannelData(1))
+              );
+              recordingLength += bufferSize;
+              //}
+
+              //重新计时
+              clearTimeout(timeout);
+              timeout = setTimeout(stopRecording, 5000); // x秒后停止录音
+            }
+          };
+
+        },
+        function(e) {
+          console.error(e);
+        }
+      );
+
+      function stopRecording() {
+        //if (isRecording) {
+          //isRecording = false;
+          console.log("2秒未检测到声音，停止录音...");
+          recorder.disconnect(context.destination);
+          mediaStream.disconnect(recorder);
+          // 在此处添加停止录音的逻辑
+          // 可能需要一个标志来表示已经停止录音
+
+          blob = covert2audio(leftchannel, rightchannel, recordingLength);
+          const formData = new FormData();
+          formData.append('audio', blob, 'recording.wav');
+
+          if (!wakeup) {
+            fetch('/wakeup', {
+              method: 'POST',
+              body: formData
+            })
+                    .then(response => response.json())
+                    .then(data => {
+                      console.log(data.result);
+                      const lineBreak = document.createElement('br');
+                      resultDisplay.appendChild(lineBreak);
+                      const resultText = document.createTextNode('我 :' + data.text);
+                      resultDisplay.appendChild(resultText);
+                      const lineBreak2 = document.createElement('br');
+                      resultDisplay.appendChild(lineBreak2);
+                      const outputText = document.createTextNode('网易精灵 :' + data.output);
+                      if (data.output === '你好，我在') {
+                        wakeup = true;
+                      }
+                      resultDisplay.appendChild(outputText);
+
+                      console.log("开始录音...");
+                      mediaStream.connect(recorder);
+                      recorder.connect(context.destination);
+                    })
+                    .catch(error => {
+                      console.error('Error sending audio data to server:', error);
+                    });
+          }else{
+            fetch('/upload', {
+              method: 'POST',
+              body: formData
+            })
+                    .then(response => response.json())
+                    .then(data => {
+                      console.log(data.result);
+                      const lineBreak = document.createElement('br');
+                      resultDisplay.appendChild(lineBreak);
+                      const resultText = document.createTextNode('我 :' + data.text);
+                      resultDisplay.appendChild(resultText);
+                      const lineBreak2 = document.createElement('br');
+                      resultDisplay.appendChild(lineBreak2);
+                      const outputText = document.createTextNode('网易精灵 :' + data.output);
+                      resultDisplay.appendChild(outputText);
+
+                      console.log("开始录音...");
+                      mediaStream.connect(recorder);
+                      recorder.connect(context.destination);
+                    })
+                    .catch(error => {
+                      console.error('Error sending audio data to server:', error);
+                    });
+          }
+
+          leftchannel = [];
+          rightchannel = [];
+
+        //
+      }
+
+      // const threshold = 0.5;
+      // let isRecording = false;
+      // let timeout;
+      //
+      // var leftchannel = [];
+      // var rightchannel = [];
+      // var recordingLength = 0;
+      // var blob = null;
+      // var SAMPLE_RATE = 44100;
+
+      // navigator.mediaDevices.getUserMedia(
+      //   {
+      //     // audio: true
+      //     audio: {
+      //       sampleRate: SAMPLE_RATE,
+      //       channelCount: 2 // canary 中此设置未生效，始终为 2
+      //     }
+      //   },)
+      //   .then(function(stream) {
+      //     const audioContext = new AudioContext();
+      //     const source = audioContext.createMediaStreamSource(stream);
+      //     // const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      //
+      //     let processor = null;
+      //     const bufferSize = 2048;
+      //     const numberOfInputChannels = 2;
+      //     const numberOfOutputChannels = 2;
+      //
+      //     if (audioContext.createScriptProcessor) {
+      //       processor = audioContext.createScriptProcessor(
+      //         bufferSize,
+      //         numberOfInputChannels,
+      //         numberOfOutputChannels
+      //       );
+      //     } else {
+      //       processor = audioContext.createJavaScriptNode(
+      //         bufferSize,
+      //         numberOfInputChannels,
+      //         numberOfOutputChannels
+      //       );
+      //     }
+      //
+      //
+      //     source.connect(processor);
+      //     processor.connect(audioContext.destination);
+      //
+      //     processor.onaudioprocess = function(event) {
+      //       const inputBuffer = event.inputBuffer;
+      //       const inputData = inputBuffer.getChannelData(0);
+      //       let maxValue = 0;
+      //
+      //       for (let i = 0; i < inputData.length; i++) {
+      //         const absValue = Math.abs(inputData[i]);
+      //         if (absValue > maxValue) {
+      //           maxValue = absValue;
+      //         }
+      //       }
+      //
+      //       if (maxValue > threshold) {
+      //         console.log("检测到声音...");
+      //
+      //         if (!isRecording) {
+      //           isRecording = true;
+      //           console.log("开始录音...");
+      //
+      //           leftchannel.push(
+      //             new Float32Array(event.inputBuffer.getChannelData(0))
+      //           );
+      //           rightchannel.push(
+      //             new Float32Array(event.inputBuffer.getChannelData(1))
+      //           );
+      //           recordingLength += bufferSize;
+      //         }
+      //
+      //         // 重新计时
+      //         clearTimeout(timeout);
+      //         timeout = setTimeout(stopRecording, 5000); // 5秒后停止录音
+      //       }
+      //     };
+      //
+      //     function stopRecording() {
+      //       if (isRecording) {
+      //         isRecording = false;
+      //         console.log("5秒未检测到声音，停止录音...");
+      //         // 在此处添加停止录音的逻辑
+      //         // 可能需要一个标志来表示已经停止录音
+      //
+      //         blob = covert2audio(leftchannel, rightchannel, recordingLength);
+      //         const formData = new FormData();
+      //         formData.append('audio', blob, 'recording.wav');
+      //
+      //         fetch('/wakeup', {
+      //           method: 'POST',
+      //           body: formData
+      //         })
+      //           .then(response => response.json())
+      //           .then(data => {
+      //             console.log(data.result);
+      //             const lineBreak = document.createElement('br');
+      //             resultDisplay.appendChild(lineBreak);
+      //             const resultText = document.createTextNode('我 :'+ data.text);
+      //             resultDisplay.appendChild(resultText);
+      //             const lineBreak2 = document.createElement('br');
+      //             resultDisplay.appendChild(lineBreak2);
+      //             const outputText = document.createTextNode('网易精灵 :'+ data.output);
+      //             resultDisplay.appendChild(outputText);
+      //           })
+      //           .catch(error => {
+      //             console.error('Error sending audio data to server:', error);
+      //           });
+      //
+      //         leftchannel = [];
+      //         ightchannel = [];
+      //
+      //       }
+      //     }
+      //   })
+      //   .catch(function(err) {
+      //     console.error('获取用户音频失败：', err);
+      //   });
+
+
+
+      // startRecordingButton.addEventListener("click", function() {
+      //   start = new Date().getTime();
+      //   startRecordingButton.disabled = true;
+      //   stopRecordingButton.disabled = false;
+      //
+      // });
+      //
+      // stopRecordingButton.addEventListener("click", function() {
+      //     info.textContent = String((new Date().getTime()-start)/1000).toHHMMSS();
+      //   // window.AudioContext = window.AudioContext || window.webkitAudioContext;
+      //
+      //   // stop recording
+      //   recorder.disconnect(context.destination);
+      //   mediaStream.disconnect(recorder);
+      //
+      //   covert2audio(leftchannel, rightchannel, recordingLength)
+      //
+      //   // 发送音频数据到后端
+      //   const formData = new FormData();
+      //
+      //   formData.append('audio', blob, 'recording.wav');
+      //
+      //   fetch('/wakeup', {
+      //     method: 'POST',
+      //     body: formData
+      //   })
+      //     .then(response => response.json())
+      //     .then(data => {
+      //       console.log(data.result);
+      //       const lineBreak = document.createElement('br');
+      //       resultDisplay.appendChild(lineBreak);
+      //       const resultText = document.createTextNode('我 :'+ data.text);
+      //       resultDisplay.appendChild(resultText);
+      //       const lineBreak2 = document.createElement('br');
+      //       resultDisplay.appendChild(lineBreak2);
+      //       const outputText = document.createTextNode('网易精灵 :'+ data.output);
+      //       resultDisplay.appendChild(outputText);
+      //     })
+      //     .catch(error => {
+      //       console.error('Error sending audio data to server:', error);
+      //     });
+      //
+      //   if(wakeup){
+      //     fetch('/upload', {
+      //       method: 'POST',
+      //       body: formData
+      //     })
+      //       .then(response => response.json())
+      //       .then(data => {
+      //         console.log(data.result);
+      //         const lineBreak = document.createElement('br');
+      //         resultDisplay.appendChild(lineBreak);
+      //         const resultText = document.createTextNode('我 :'+ data.text);
+      //         resultDisplay.appendChild(resultText);
+      //         const lineBreak2 = document.createElement('br');
+      //         resultDisplay.appendChild(lineBreak2);
+      //         const outputText = document.createTextNode('网易精灵 :'+ data.output);
+      //         resultDisplay.appendChild(outputText);
+      //       })
+      //       .catch(error => {
+      //         console.error('Error sending audio data to server:', error);
+      //       });
+      //   }
+      //
+      //   leftchannel = [];
+      //   rightchannel = [];
+      //
+      // });
+      //
+      //
+      function covert2audio(leftchannel, rightchannel, recordingLength) {
+        // we flat the left and right channels down
+        // Float32Array[] => Float32Array
+        var leftBuffer = flattenArray(leftchannel, recordingLength);
+        var rightBuffer = flattenArray(rightchannel, recordingLength);
+        // we interleave both channels together
+        // [left[0],right[0],left[1],right[1],...]
+        var interleaved = interleave(leftBuffer, rightBuffer);
+
+        // we create our wav file
+        var buffer = new ArrayBuffer(44 + interleaved.length * 2);
+        var view = new DataView(buffer);
+
+        // RIFF chunk descriptor
+        writeUTFBytes(view, 0, "RIFF");
+        view.setUint32(4, 44 + interleaved.length * 2, true);
+        writeUTFBytes(view, 8, "WAVE");
+        // FMT sub-chunk
+        writeUTFBytes(view, 12, "fmt ");
+        view.setUint32(16, 16, true); // chunkSize
+        view.setUint16(20, 1, true); // wFormatTag
+        view.setUint16(22, 2, true); // wChannels: stereo (2 channels)
+        view.setUint32(24, 44100, true); // dwSamplesPerSec
+        view.setUint32(28, 44100 * 4, true); // dwAvgBytesPerSec
+        view.setUint16(32, 4, true); // wBlockAlign
+        view.setUint16(34, 16, true); // wBitsPerSample
+        // data sub-chunk
+        writeUTFBytes(view, 36, "data");
+        view.setUint32(40, interleaved.length * 2, true);
+
+        // write the PCM samples
+        var index = 44;
+        var volume = 1;
+        for (var i = 0; i < interleaved.length; i++) {
+          view.setInt16(index, interleaved[i] * (0x7fff * volume), true);
+          index += 2;
+        }
+
+        // our final blob
+        return new Blob([view], {type: "audio/wav"})
+      }
+
+      function flattenArray(channelBuffer, recordingLength) {
+        var result = new Float32Array(recordingLength);
+        var offset = 0;
+        for (var i = 0; i < channelBuffer.length; i++) {
+          var buffer = channelBuffer[i];
+          result.set(buffer, offset);
+          offset += buffer.length;
+        }
+        return result;
+      }
+
+      function interleave(leftChannel, rightChannel) {
+        var length = leftChannel.length + rightChannel.length;
+        var result = new Float32Array(length);
+
+        var inputIndex = 0;
+
+        for (var index = 0; index < length; ) {
+          result[index++] = leftChannel[inputIndex];
+          result[index++] = rightChannel[inputIndex];
+          inputIndex++;
+        }
+        return result;
+      }
+
+      function writeUTFBytes(view, offset, string) {
+        for (var i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      }
+
+  </script>
+</body>
+</html>
