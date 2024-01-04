@@ -1,0 +1,25 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "audio": {
+      "array": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "Sequence"
+      },
+      "sampling_rate": {
+        "dtype": "int64",
+        "_type": "Value"
+      }
+    },
+    "sentence": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
